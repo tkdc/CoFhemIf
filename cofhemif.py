@@ -25,7 +25,7 @@ import threading
 import requests
 
 __title__ = 'FhemIf'
-__version__ = '1.0.0'
+__version__ = '1.1.0'
 __author__ = 'Thomas Katemann'
 __copyright__ = 'Copyright 2018 Thomas Katemann'
 __license__ = 'GPLv3'
@@ -42,8 +42,9 @@ class CoFhemIf(object):
         self.ip_port = '8082'
 
         # device configuration
-        self.a_swt_dev = ['05_LamBed', '08_LamCen', '01_MpBase', '04_MedTow', '06_MedKit']  # switchs
+        self.a_swt_dev = ['05_LamBed', '08_LamCen', '01_MpBase', '04_MedTow', '06_MedKit']  # switches
         self.a_temp_dev = ['01_LivRoom', '02_Bath', '03_Kitchen', '02_OutdoorTH']  # temp control and sensors
+        self.a_temp_dev_name = ['LivRoom', 'Bath', 'Kitchen', 'Outdoor']  # temp control and sensors
 
         # http request templates
         self.str_http_resp = ''
@@ -69,6 +70,9 @@ class CoFhemIf(object):
         self.d_value_01 = [0.0, 0.0, 0.0, 0.0]
         self.d_value_02 = [0.0, 0.0, 0.0, 0.0]
         self.d_value_03 = [0.0, 0.0, 0.0, None]
+        self.a_str_value_01 = ['', '', '', '']
+        self.a_str_value_02 = ['', '', '', '']
+        self.a_str_value_03 = ['', '', '', '']
 
         # init, cycle and event config
         self.idx_ct_cnt = 0
@@ -102,7 +106,7 @@ class CoFhemIf(object):
 
                 self.get_fhem_csrf()
                 for idx_dev in range(4):
-                    self.get_fhem_dev_prop(idx_dev)
+                    self.get_fhem_dev_prop(idx_dev, True)
                 self.b_init = False
 
             else:
@@ -168,6 +172,11 @@ class CoFhemIf(object):
         self.send_http_req(self.make_temp_cmd(idx_dev, 'desired-temp', value))
         self.get_cmd_info('FHEM: set desired-temp: ' + self.a_temp_dev[idx_dev] + ' = ' + str(value))
 
+        a_temp_dev_cur = self.a_temp_dev_name[idx_dev]
+        self.a_str_value_03[idx_dev] = self.a_str_value_03[idx_dev] + 's'
+        self.ev_send_info(idx_dev, a_temp_dev_cur, self.a_str_value_01[idx_dev], self.a_str_value_02[idx_dev],
+                      self.a_str_value_03[idx_dev])
+
     def send_http_req(self, str_cmd, str_type='text'):
         """
 
@@ -178,27 +187,28 @@ class CoFhemIf(object):
         resp = requests.get(str_cmd)
         return resp.__getattribute__(str_type)
 
-    def get_fhem_dev_prop(self, idx_dev):
+    def get_fhem_dev_prop(self, idx_dev, b_init = False):
         """
 
         :param idx_dev:
         """
+        bSendinfo = False
         self.str_http_resp = self.send_http_req(self.str_temp_dev_req_tmpl % (
             self.ip_address, self.ip_port, self.a_temp_dev[idx_dev]))
 
         if idx_dev <= 2:
 
-            d_value_03 = (self.str_split(self.str_http_resp, self.str_actor1 % (
+            d_value_02 = (self.str_split(self.str_http_resp, self.str_actor1 % (
                 self.a_temp_dev[idx_dev]), self.str_actor2))
-            d_value_02 = float(self.str_split(self.str_http_resp, self.str_des_temp1 % (
+            d_value_03 = float(self.str_split(self.str_http_resp, self.str_des_temp1 % (
                 self.a_temp_dev[idx_dev]), self.str_des_temp2))
             d_value_01 = float(self.str_split(self.str_http_resp, self.str_meas_temp1 % (
                 self.a_temp_dev[idx_dev]), self.str_meas_temp2))
 
-            a_temp_dev_cur = self.a_temp_dev[idx_dev]
-            str_val1_cur = ' - M: ' + str(d_value_01)
-            str_val2_cur = ' - D: ' + str(d_value_02)
-            str_val3_cur = ' - A: ' + str(d_value_03)
+            a_temp_dev_cur = self.a_temp_dev_name[idx_dev]
+            str_val1_cur = 'T ' + str(d_value_01)
+            str_val3_cur = 'D ' + str(d_value_03)
+            str_val2_cur = 'A ' + str(d_value_02)
 
         else:
             d_value_01 = float(
@@ -207,22 +217,51 @@ class CoFhemIf(object):
                 self.str_split(self.str_http_resp, self.str_od_hum1 % (self.a_temp_dev[idx_dev]), self.str_od_hum2))
             d_value_03 = None
 
-            a_temp_dev_cur = self.a_temp_dev[idx_dev]
-            str_val1_cur = '  -  T: ' + str(d_value_01)
-            str_val2_cur = '  -  H: ' + str(d_value_02)
+            a_temp_dev_cur = self.a_temp_dev_name[idx_dev]
+            str_val1_cur = 'T ' + str(d_value_01)
+            str_val2_cur = 'H ' + str(d_value_02)
             str_val3_cur = ''
 
-        if d_value_01 != self.d_value_01[idx_dev] \
-                or d_value_02 != self.d_value_02[idx_dev] \
-                or d_value_03 != self.d_value_03[idx_dev]:
+        if d_value_01 != self.d_value_01[idx_dev]:
+
+            # determine direction
+            if b_init:
+                self.a_str_value_01[idx_dev] = str_val1_cur
+            elif d_value_01 < self.d_value_01[idx_dev]:
+                self.a_str_value_01[idx_dev] = str_val1_cur + u'\u2304'
+            elif d_value_01 > self.d_value_01[idx_dev]:
+                self.a_str_value_01[idx_dev] = str_val1_cur + u'\u2303'
+            else:
+                self.a_str_value_01[idx_dev] = str_val1_cur
 
             self.d_value_01[idx_dev] = d_value_01
+            bSendinfo = True
+
+        if d_value_02 != self.d_value_02[idx_dev]:
+
+            # determine direction
+            if b_init:
+                self.a_str_value_02[idx_dev] = str_val2_cur
+            elif d_value_02 < self.d_value_02[idx_dev]:
+                self.a_str_value_02[idx_dev] =  str_val2_cur + u'\u2304'
+            elif d_value_02 > self.d_value_02[idx_dev]:
+                self.a_str_value_02[idx_dev] = str_val2_cur + u'\u2303'
+            else:
+                self.a_str_value_02[idx_dev] = str_val2_cur
+
             self.d_value_02[idx_dev] = d_value_02
+            bSendinfo = True
+
+        if d_value_03 != self.d_value_03[idx_dev]:
+            self.a_str_value_03[idx_dev] = str_val3_cur
             self.d_value_03[idx_dev] = d_value_03
+            bSendinfo = True
 
-            self.get_cmd_info('FHEM: ' + a_temp_dev_cur + str_val1_cur + str_val2_cur + str_val3_cur)
-
-            self.ev_send_info(idx_dev, a_temp_dev_cur, str_val1_cur, str_val2_cur, str_val3_cur)
+        if bSendinfo:
+            self.get_cmd_info('FHEM: ' + a_temp_dev_cur + ' - ' + self.a_str_value_01[idx_dev] + ' - '
+                              + self.a_str_value_02[idx_dev] + ' - ' + self.a_str_value_03[idx_dev])
+            self.ev_send_info(idx_dev, a_temp_dev_cur, self.a_str_value_01[idx_dev], self.a_str_value_02[idx_dev],
+                              self.a_str_value_03[idx_dev])
 
     def str_split(self, str_base, str_sp1, str_sp2):
         """
